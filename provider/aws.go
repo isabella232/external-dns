@@ -323,6 +323,9 @@ func (p *AWSProvider) records(ctx context.Context, zones map[string]*route53.Hos
 				endpoints = append(endpoints, ep)
 			}
 		}
+		// Route53 is limite to five requests per second per AWS account
+		// Make sure than we do not do more than 4 per second here
+		time.Sleep(250 * time.Millisecond)
 
 		return true
 	}
