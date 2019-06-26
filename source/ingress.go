@@ -90,12 +90,12 @@ func NewIngressSource(kubeClient kubernetes.Interface, namespace, annotationFilt
 	// TODO informer is not explicitly stopped since controller is not passing in its channel.
 	informerFactory.Start(wait.NeverStop)
 
-	// wait for the local cache to be populated.
-	err = wait.Poll(time.Second, 60*time.Second, func() (bool, error) {
-		return ingressInformer.Informer().HasSynced(), nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to sync cache: %v", err)
+	// Wait for all informers to be synced.
+	// TODO: Add a timeout to exit
+	for informer, isSynced := range informerFactory.WaitForCacheSync(wait.NeverStop) {
+		if !isSynced {
+			return nil, fmt.Errorf("error syncing informer %s", informer)
+		}
 	}
 
 	sc := &ingressSource{
