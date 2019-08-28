@@ -444,14 +444,14 @@ func (sc *serviceSource) generateEndpoints(svc *v1.Service, hostname string, pro
 		}
 	case v1.ServiceTypeNodePort:
 		// add the nodeTargets and extract an SRV endpoint
-			targets, err = sc.extractNodePortTargets(svc)
-			if err != nil {
-				log.Errorf("Unable to extract targets from service %s/%s error: %v", svc.Namespace, svc.Name, err)
-				return endpoints
-			}
-			endpoints = append(endpoints, sc.extractNodePortEndpoints(svc, targets, hostname, ttl)...)
-		case v1.ServiceTypeExternalName:
-			targets = append(targets, extractServiceExternalName(svc)...)
+		targets, err = sc.extractNodePortTargets(svc)
+		if err != nil {
+			log.Errorf("Unable to extract targets from service %s/%s error: %v", svc.Namespace, svc.Name, err)
+			return endpoints
+		}
+		endpoints = append(endpoints, sc.extractNodePortEndpoints(svc, targets, hostname, ttl)...)
+	case v1.ServiceTypeExternalName:
+		targets = append(targets, extractServiceExternalName(svc)...)
 	}
 
 	for _, t := range targets {
