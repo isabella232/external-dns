@@ -124,7 +124,7 @@ func NewServiceSource(kubeClient kubernetes.Interface, namespace, annotationFilt
 	// TODO:// Add timeout to exit
 	for informer, isSynced := range informerFactory.WaitForCacheSync(wait.NeverStop) {
 		if !isSynced {
-			return nil,fmt.Errorf("error syncing informer %s",informer)
+			return nil, fmt.Errorf("error syncing informer %s", informer)
 		}
 	}
 
@@ -435,18 +435,23 @@ func (sc *serviceSource) generateEndpoints(svc *v1.Service, hostname string, pro
 			targets = append(targets, extractServiceIps(svc)...)
 		}
 		if svc.Spec.ClusterIP == v1.ClusterIPNone {
-			endpoints = append(endpoints, sc.extractHeadlessEndpoints(svc, hostname, ttl)...)
+			if targetAnnotationTargets := getTargetsFromTargetAnnotation(svc.Annotations); len(targetAnnotationTargets) > 0 {
+				log.Debugf("extracted headless service %s/%s targets from target annotation: %+v", svc.Namespace, svc.Name, targetAnnotationTargets)
+				targets = append(targets, targetAnnotationTargets...)
+			} else {
+				endpoints = append(endpoints, sc.extractHeadlessEndpoints(svc, hostname, ttl)...)
+			}
 		}
 	case v1.ServiceTypeNodePort:
 		// add the nodeTargets and extract an SRV endpoint
-		targets, err = sc.extractNodePortTargets(svc)
-		if err != nil {
-			log.Errorf("Unable to extract targets from service %s/%s error: %v", svc.Namespace, svc.Name, err)
-			return endpoints
-		}
-		endpoints = append(endpoints, sc.extractNodePortEndpoints(svc, targets, hostname, ttl)...)
-	case v1.ServiceTypeExternalName:
-		targets = append(targets, extractServiceExternalName(svc)...)
+			targets, err = sc.extractNodePortTargets(svc)
+			if err != nil {
+				log.Errorf("Unable to extract targets from service %s/%s error: %v", svc.Namespace, svc.Name, err)
+				return endpoints
+			}
+			endpoints = append(endpoints, sc.extractNodePortEndpoints(svc, targets, hostname, ttl)...)
+		case v1.ServiceTypeExternalName:
+			targets = append(targets, extractServiceExternalName(svc)...)
 	}
 
 	for _, t := range targets {
