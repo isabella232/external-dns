@@ -30,6 +30,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/route53"
 	"github.com/linki/instrumented_http"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
 	"sigs.k8s.io/external-dns/endpoint"
@@ -97,7 +98,50 @@ var (
 		"elb.cn-northwest-1.amazonaws.com.cn": "ZQEIKTCZ8352D",
 		"elb.me-south-1.amazonaws.com":        "Z3QSRYVP46NYYV",
 	}
+
+	listHostedZonesPagesMetric = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "external_dns",
+			Subsystem: "aws",
+			Name:      "list_hosted_zones_pages",
+			Help:      "Number of list_hosted_zones_pages.",
+		},
+	)
+
+	listResourceRecordSetsPagesMetric = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "external_dns",
+			Subsystem: "aws",
+			Name:      "list_resource_record_sets_pages",
+			Help:      "Number of list_hosted_zones_pages.",
+		},
+	)
+
+	changeResourceRecordSetsMetric = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "external_dns",
+			Subsystem: "aws",
+			Name:      "change_resource_record_sets",
+			Help:      "Number of change_resource_record_sets.",
+		},
+	)
+
+	listTagsForResourceMetric = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "external_dns",
+			Subsystem: "aws",
+			Name:      "list_tags_for_resource",
+			Help:      "Number of list_tags_for_resource.",
+		},
+	)
 )
+
+func init() {
+	prometheus.MustRegister(listHostedZonesPagesMetric)
+	prometheus.MustRegister(listResourceRecordSetsPagesMetric)
+	prometheus.MustRegister(changeResourceRecordSetsMetric)
+	prometheus.MustRegister(listTagsForResourceMetric)
+}
 
 // Route53API is the subset of the AWS Route53 API that we actually use.  Add methods as required. Signatures must match exactly.
 // mostly taken from: https://github.com/kubernetes/kubernetes/blob/853167624edb6bc0cfdcdfb88e746e178f5db36c/federation/pkg/dnsprovider/providers/aws/route53/stubs/route53api.go
@@ -221,6 +265,7 @@ func (p *AWSProvider) Zones(ctx context.Context) (map[string]*route53.HostedZone
 		return true
 	}
 
+	listHostedZonesPagesMetric.Inc()
 	err := p.client.ListHostedZonesPagesWithContext(ctx, &route53.ListHostedZonesInput{}, f)
 	if err != nil {
 		return nil, err
@@ -335,6 +380,7 @@ func (p *AWSProvider) records(ctx context.Context, zones map[string]*route53.Hos
 			HostedZoneId: z.Id,
 		}
 
+		listResourceRecordSetsPagesMetric.Inc()
 		if err := p.client.ListResourceRecordSetsPagesWithContext(ctx, params, f); err != nil {
 			return nil, err
 		}
@@ -429,6 +475,7 @@ func (p *AWSProvider) submitChanges(ctx context.Context, changes []*route53.Chan
 					},
 				}
 
+				changeResourceRecordSetsMetric.Inc()
 				if _, err := p.client.ChangeResourceRecordSetsWithContext(ctx, params); err != nil {
 					log.Errorf("Failure in zone %s [Id: %s]", aws.StringValue(zones[z].Name), z)
 					log.Error(err) //TODO(ideahitme): consider changing the interface in cases when this error might be a concern for other components
@@ -573,6 +620,7 @@ func (p *AWSProvider) newChange(action string, ep *endpoint.Endpoint, recordsCac
 }
 
 func (p *AWSProvider) tagsForZone(ctx context.Context, zoneID string) (map[string]string, error) {
+	listTagsForResourceMetric.Inc()
 	response, err := p.client.ListTagsForResourceWithContext(ctx, &route53.ListTagsForResourceInput{
 		ResourceType: aws.String("hostedzone"),
 		ResourceId:   aws.String(zoneID),
