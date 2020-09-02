@@ -333,6 +333,8 @@ func (p *AWSProvider) submitChanges(changes []*route53.Change) error {
 			if nLogicalRecordsInBatch >= p.batchChangeSize || nRecordsAsViewedByRoute53LimitsInBatch >= route53ResourceRecordsPerBatchLimit {
 				log.Errorf("Attempting to update %d ResourceRecords across %d change sets, with a total of %d changes as measured by Route53! Route53 limits Changes to %d ResourceRecords, so this will almost certainly fail!",
 					nLogicalRecordsInBatch, len(b), nRecordsAsViewedByRoute53LimitsInBatch, route53ResourceRecordsPerBatchLimit)
+			} else {
+				log.Infof("Attempting to update %d ResourceRecords across %d change sets, with a total of %d changes as measured by Route53", nLogicalRecordsInBatch, len(b), nRecordsAsViewedByRoute53LimitsInBatch)
 			}
 
 			if !p.dryRun {
