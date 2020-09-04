@@ -37,6 +37,8 @@ const (
 	// provider specific key that designates whether an AWS ALIAS record has the EvaluateTargetHealth
 	// field set to true.
 	providerSpecificEvaluateTargetHealth = "aws/evaluate-target-health"
+
+	route53ResourceRecordsPerBatchLimit = 1000
 )
 
 var (
@@ -308,8 +310,31 @@ func (p *AWSProvider) submitChanges(changes []*route53.Change) error {
 		batchCs := batchChangeSet(cs, p.batchChangeSize)
 
 		for i, b := range batchCs {
+			nLogicalRecordsInBatch := 0
+			nRecordsAsViewedByRoute53LimitsInBatch := 0
 			for _, c := range b {
-				log.Infof("Desired change: %s %s %s", *c.Action, *c.ResourceRecordSet.Name, *c.ResourceRecordSet.Type)
+				multiplier := 1
+				if *c.Action == route53.ChangeActionUpsert {
+					// upserted records count as both create+delete
+					multiplier = 2
+				}
+				nLogicalRecordsInChange := len(c.ResourceRecordSet.ResourceRecords)
+				nRecordsAsViewedByRoute53LimitsInChange := nLogicalRecordsInChange * multiplier
+				if nRecordsAsViewedByRoute53LimitsInChange > 200 {
+					log.Warnf("Desired change: %s %s %s has %d ResourceRecords, which is pretty spicy. Route53 limits Changes to %d ResourceRecords, so you may consider limiting the number of records?",
+						*c.Action, *c.ResourceRecordSet.Name, *c.ResourceRecordSet.Type, nLogicalRecordsInChange, nRecordsAsViewedByRoute53LimitsInChange, route53ResourceRecordsPerBatchLimit)
+				} else {
+					log.Infof("Desired change: %s %s %s (%d records, %d records in route53.Change)", *c.Action, *c.ResourceRecordSet.Name, *c.ResourceRecordSet.Type, nLogicalRecordsInChange, nRecordsAsViewedByRoute53LimitsInChange)
+				}
+				nLogicalRecordsInBatch += nLogicalRecordsInChange
+				nRecordsAsViewedByRoute53LimitsInBatch += nRecordsAsViewedByRoute53LimitsInChange
+			}
+
+			if nLogicalRecordsInBatch >= p.batchChangeSize || nRecordsAsViewedByRoute53LimitsInBatch >= route53ResourceRecordsPerBatchLimit {
+				log.Errorf("Attempting to update %d ResourceRecords across %d change sets, with a total of %d changes as measured by Route53! Route53 limits Changes to %d ResourceRecords, so this will almost certainly fail!",
+					nLogicalRecordsInBatch, len(b), nRecordsAsViewedByRoute53LimitsInBatch, route53ResourceRecordsPerBatchLimit)
+			} else {
+				log.Infof("Attempting to update %d ResourceRecords across %d change sets, with a total of %d changes as measured by Route53", nLogicalRecordsInBatch, len(b), nRecordsAsViewedByRoute53LimitsInBatch)
 			}
 
 			if !p.dryRun {
