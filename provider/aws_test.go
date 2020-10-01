@@ -17,6 +17,7 @@ limitations under the License.
 package provider
 
 import (
+	"binary"
 	"fmt"
 	"net"
 	"sort"
@@ -582,6 +583,35 @@ func TestAWSChangesByZones(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestAWSsubmitChangesTooManyEndpointTargets(t *testing.T) {
+	provider, _ := newAWSProvider(t, NewDomainFilter([]string{"ext-dns-test-2.teapot.zalan.do."}), NewZoneIDFilter([]string{}), NewZoneTypeFilter(""), defaultEvaluateTargetHealth, false, []*endpoint.Endpoint{})
+	const subnets = 16
+	const hosts = defaultBatchChangeSize / subnets
+
+	endpoints := make([]*endpoint.Endpoint, 0)
+
+	hostname := "largerecord.zone-1.ext-dns-test-2.teapot.zalan.do"
+	targets := []string{}
+	for i := uint32(0); i < 500; i++ {
+		ipByte := make([]byte, 4)
+		binary.BigEndian.PutUint32(ipByte, i)
+		targets = append(targets, net.IP(ipByte).String())
+	}
+	ep := endpoint.NewEndpointWithTTL(hostname, endpoint.RecordTypeA, endpoint.TTL(recordTTL), targets...)
+	fmt.Printf("Creating endpoint with %d targets: %v\n", len(targets), ep)
+	endpoints = append(endpoints, ep)
+
+	cs := make([]*route53.Change, 0, len(endpoints))
+	cs = append(cs, provider.newChanges(route53.ChangeActionCreate, endpoints)...)
+
+	require.NoError(t, provider.submitChanges(cs))
+
+	records, err := provider.Records()
+	require.NoError(t, err)
+
+	validateEndpoints(t, records, endpoints)
 }
 
 func TestAWSsubmitChanges(t *testing.T) {
