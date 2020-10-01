@@ -18,16 +18,17 @@ package provider
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/DataDog/external-dns/endpoint"
+	"github.com/DataDog/external-dns/internal/testutils"
+	"github.com/DataDog/external-dns/plan"
 	"github.com/aws/aws-sdk-go/aws"
 	sd "github.com/aws/aws-sdk-go/service/servicediscovery"
-	"github.com/kubernetes-incubator/external-dns/endpoint"
-	"github.com/kubernetes-incubator/external-dns/internal/testutils"
-	"github.com/kubernetes-incubator/external-dns/plan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -49,7 +50,7 @@ type AWSSDClientStub struct {
 func (s *AWSSDClientStub) CreateService(input *sd.CreateServiceInput) (*sd.CreateServiceOutput, error) {
 
 	srv := &sd.Service{
-		Id:               aws.String(string(rand.Intn(10000))),
+		Id:               aws.String(fmt.Sprintf("%d", (rand.Intn(10000)))),
 		DnsConfig:        input.DnsConfig,
 		Name:             input.Name,
 		Description:      input.Description,

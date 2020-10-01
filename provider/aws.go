@@ -22,12 +22,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DataDog/external-dns/endpoint"
+	"github.com/DataDog/external-dns/plan"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/route53"
-	"github.com/kubernetes-incubator/external-dns/endpoint"
-	"github.com/kubernetes-incubator/external-dns/plan"
 	"github.com/linki/instrumented_http"
 	log "github.com/sirupsen/logrus"
 )
@@ -211,7 +211,7 @@ func (p *AWSProvider) Records() (endpoints []*endpoint.Endpoint, _ error) {
 	f := func(resp *route53.ListResourceRecordSetsOutput, lastPage bool) (shouldContinue bool) {
 		for _, r := range resp.ResourceRecordSets {
 			// TODO(linki, ownership): Remove once ownership system is in place.
-			// See: https://github.com/kubernetes-incubator/external-dns/pull/122/files/74e2c3d3e237411e619aefc5aab694742001cdec#r109863370
+			// See: https://github.com/DataDog/external-dns/pull/122/files/74e2c3d3e237411e619aefc5aab694742001cdec#r109863370
 
 			if !supportedRecordType(aws.StringValue(r.Type)) {
 				continue
@@ -418,7 +418,6 @@ func (p *AWSProvider) newChange(action string, endpoint *endpoint.Endpoint) *rou
 		if nEndpointsLimit >= maxEndpointsInRoute53 {
 			nEndpointsLimit = maxEndpointsInRoute53
 			log.Warnf("Truncated endpoint targets to %d for endpoint %s (%d targets) as Route53 cannot handle more than %d resource records", nEndpointsLimit, *aws.String(endpoint.Targets[0]), len(endpoint.Targets), maxEndpointsInRoute53)
-			panic(fmt.Sprintf("FUCK tried to create endpoint with %d targets", len(endpoint.Targets)))
 		}
 		change.ResourceRecordSet.ResourceRecords = make([]*route53.ResourceRecord, nEndpointsLimit)
 		for i := 0; i < nEndpointsLimit; i++ {

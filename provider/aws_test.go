@@ -17,7 +17,7 @@ limitations under the License.
 package provider
 
 import (
-	"binary"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"sort"
@@ -25,11 +25,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataDog/external-dns/endpoint"
+	"github.com/DataDog/external-dns/internal/testutils"
+	"github.com/DataDog/external-dns/plan"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/route53"
-	"github.com/kubernetes-incubator/external-dns/endpoint"
-	"github.com/kubernetes-incubator/external-dns/internal/testutils"
-	"github.com/kubernetes-incubator/external-dns/plan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -586,11 +586,14 @@ func TestAWSChangesByZones(t *testing.T) {
 }
 
 func TestAWSsubmitChangesTooManyEndpointTargets(t *testing.T) {
+	// Route53 bails if there are more than 400 records in a recordset, so we blindly
+	// limit an Endpoint.Targets to the first 400 to avoid this failure
 	provider, _ := newAWSProvider(t, NewDomainFilter([]string{"ext-dns-test-2.teapot.zalan.do."}), NewZoneIDFilter([]string{}), NewZoneTypeFilter(""), defaultEvaluateTargetHealth, false, []*endpoint.Endpoint{})
 	const subnets = 16
 	const hosts = defaultBatchChangeSize / subnets
 
 	endpoints := make([]*endpoint.Endpoint, 0)
+	expectedEndpoints := make([]*endpoint.Endpoint, 0)
 
 	hostname := "largerecord.zone-1.ext-dns-test-2.teapot.zalan.do"
 	targets := []string{}
@@ -600,8 +603,10 @@ func TestAWSsubmitChangesTooManyEndpointTargets(t *testing.T) {
 		targets = append(targets, net.IP(ipByte).String())
 	}
 	ep := endpoint.NewEndpointWithTTL(hostname, endpoint.RecordTypeA, endpoint.TTL(recordTTL), targets...)
+	expectedEp := endpoint.NewEndpointWithTTL(hostname, endpoint.RecordTypeA, endpoint.TTL(recordTTL), targets[0:400]...)
 	fmt.Printf("Creating endpoint with %d targets: %v\n", len(targets), ep)
 	endpoints = append(endpoints, ep)
+	expectedEndpoints = append(expectedEndpoints, expectedEp)
 
 	cs := make([]*route53.Change, 0, len(endpoints))
 	cs = append(cs, provider.newChanges(route53.ChangeActionCreate, endpoints)...)
@@ -611,7 +616,7 @@ func TestAWSsubmitChangesTooManyEndpointTargets(t *testing.T) {
 	records, err := provider.Records()
 	require.NoError(t, err)
 
-	validateEndpoints(t, records, endpoints)
+	validateEndpoints(t, records, expectedEndpoints)
 }
 
 func TestAWSsubmitChanges(t *testing.T) {
@@ -917,7 +922,7 @@ func TestAWSSuitableZones(t *testing.T) {
 		{"foobar.example.org.", []*route53.HostedZone{zones["example-org-private"], zones["example-org"]}},
 
 		// all matching private zones are suitable
-		// https://github.com/kubernetes-incubator/external-dns/pull/356
+		// https://github.com/DataDog/external-dns/pull/356
 		{"bar.example.org.", []*route53.HostedZone{zones["example-org-private"], zones["bar-example-org-private"], zones["bar-example-org"]}},
 
 		{"foo.bar.example.org.", []*route53.HostedZone{zones["example-org-private"], zones["bar-example-org-private"], zones["bar-example-org"]}},
