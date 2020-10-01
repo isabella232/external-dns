@@ -411,10 +411,18 @@ func (p *AWSProvider) newChange(action string, endpoint *endpoint.Endpoint) *rou
 		} else {
 			change.ResourceRecordSet.TTL = aws.Int64(int64(endpoint.RecordTTL))
 		}
-		change.ResourceRecordSet.ResourceRecords = make([]*route53.ResourceRecord, len(endpoint.Targets))
-		for idx, val := range endpoint.Targets {
-			change.ResourceRecordSet.ResourceRecords[idx] = &route53.ResourceRecord{
-				Value: aws.String(val),
+
+		// COMPUTE-495
+		maxEndpointsInRoute53 := 400
+		nEndpointsLimit := len(endpoint.Targets)
+		if nEndpointsLimit >= maxEndpointsInRoute53 {
+			nEndpointsLimit = maxEndpointsInRoute53
+			log.Warnf("Truncated endpoint targets to %d for endpoint %s (%d targets) as Route53 cannot handle more than %d resource records", nEndpointsLimit, aws.String(endpoint.Targets[0]), len(endpoint.Targets), maxEndpointsInRoute53)
+		}
+		change.ResourceRecordSet.ResourceRecords = make([]*route53.ResourceRecord, nEndpointsLimit)
+		for i := 0; i < nEndpointsLimit; i++ {
+			change.ResourceRecordSet.ResourceRecords[i] = &route53.ResourceRecord{
+				Value: aws.String(endpoint.Targets[i]),
 			}
 		}
 	}
