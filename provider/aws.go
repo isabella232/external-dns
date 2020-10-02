@@ -422,17 +422,20 @@ func (p *AWSProvider) newChange(action string, endpoint *endpoint.Endpoint) *rou
 			nEndpointsLimit = maxResourceRecordsPerEntry
 			log.Warnf("Truncating and sorting %d (of %d) endpoint targets for endpoint %s as Route53 cannot handle more than %d resource records", nEndpointsLimit, len(endpoint.Targets), endpoint.DNSName, maxResourceRecordsPerEntry)
 		}
-		targets := make([]string, nEndpointsLimit)
-		copy(targets, endpoint.Targets[0:nEndpointsLimit])
+		var targets []string
 		if len(endpoint.Targets) >= maxResourceRecordsPerEntry {
 			// ensure endpoints are sorted iff we have exceeded maxResourceRecordsPerEntry
-			sort.Strings(targets)
+			sort.Strings(endpoint.Targets)
+			targets = make([]string, maxResourceRecordsPerEntry)
+		} else {
+			targets = make([]string, len(endpoint.Targets))
 		}
+		copy(targets, endpoint.Targets[0:len(targets)])
 
 		change.ResourceRecordSet.ResourceRecords = make([]*route53.ResourceRecord, nEndpointsLimit)
-		for i := 0; i < len(change.ResourceRecordSet.ResourceRecords); i++ {
-			change.ResourceRecordSet.ResourceRecords[i] = &route53.ResourceRecord{
-				Value: aws.String(targets[i]),
+		for idx, val := range targets {
+			change.ResourceRecordSet.ResourceRecords[idx] = &route53.ResourceRecord{
+				Value: aws.String(val),
 			}
 		}
 	}
