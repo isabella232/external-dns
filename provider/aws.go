@@ -323,7 +323,7 @@ func (p *AWSProvider) submitChanges(changes []*route53.Change) error {
 				nLogicalRecordsInChange := len(c.ResourceRecordSet.ResourceRecords)
 				nRecordsAsViewedByRoute53LimitsInChange := nLogicalRecordsInChange * multiplier
 				if nRecordsAsViewedByRoute53LimitsInChange > 200 {
-					log.Warnf("Desired change: %s %s %s has %d ResourceRecords, which is pretty spicy. Route53 limits Changes to %d ResourceRecords, so you may consider limiting the number of records?",
+					log.Warnf("Desired change: %s %s %s has %d ResourceRecords, which is pretty spicy. Route53 limits changes to %d ResourceRecords, so you may consider limiting the number of records?",
 						*c.Action, *c.ResourceRecordSet.Name, *c.ResourceRecordSet.Type, nLogicalRecordsInChange, nRecordsAsViewedByRoute53LimitsInChange)
 				} else {
 					log.Infof("Desired change: %s %s %s (%d records, %d records in route53.Change)", *c.Action, *c.ResourceRecordSet.Name, *c.ResourceRecordSet.Type, nLogicalRecordsInChange, nRecordsAsViewedByRoute53LimitsInChange)
@@ -420,7 +420,7 @@ func (p *AWSProvider) newChange(action string, endpoint *endpoint.Endpoint) *rou
 		nEndpointsLimit := len(endpoint.Targets)
 		if nEndpointsLimit >= maxResourceRecordsPerEntry {
 			nEndpointsLimit = maxResourceRecordsPerEntry
-			log.Warnf("Truncating and sorting %d (of %d) endpoint targets for endpoint %s as Route53 cannot handle more than %d resource records", nEndpointsLimit, len(endpoint.Targets), *aws.String(endpoint.Targets[0]), maxResourceRecordsPerEntry)
+			log.Warnf("Truncating and sorting %d (of %d) endpoint targets for endpoint %s as Route53 cannot handle more than %d resource records", nEndpointsLimit, len(endpoint.Targets), endpoint.DNSName, maxResourceRecordsPerEntry)
 		}
 		targets := make([]string, nEndpointsLimit)
 		copy(targets, endpoint.Targets[0:nEndpointsLimit])
