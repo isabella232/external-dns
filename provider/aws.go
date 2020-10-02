@@ -22,12 +22,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kubernetes-incubator/external-dns/endpoint"
-	"github.com/kubernetes-incubator/external-dns/plan"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/route53"
+	"github.com/kubernetes-incubator/external-dns/endpoint"
+	"github.com/kubernetes-incubator/external-dns/plan"
 	"github.com/linki/instrumented_http"
 	log "github.com/sirupsen/logrus"
 )
@@ -414,15 +414,25 @@ func (p *AWSProvider) newChange(action string, endpoint *endpoint.Endpoint) *rou
 			change.ResourceRecordSet.TTL = aws.Int64(int64(endpoint.RecordTTL))
 		}
 
+		// NOTE(gabe): this is a hack to fix COMPUTE-495 where records with > maxResourceRecordsPerEntry
+		// targets are rejected by route53. A more elegant solution would be lovely,
+		// unfortunately this change was break/fix. Improvements welcome!
 		nEndpointsLimit := len(endpoint.Targets)
 		if nEndpointsLimit >= maxResourceRecordsPerEntry {
 			nEndpointsLimit = maxResourceRecordsPerEntry
-			log.Warnf("Truncated endpoint targets to %d for endpoint %s (%d targets) as Route53 cannot handle more than %d resource records", nEndpointsLimit, *aws.String(endpoint.Targets[0]), len(endpoint.Targets), maxResourceRecordsPerEntry)
+			log.Warnf("Truncating and sorting %d (of %d) endpoint targets for endpoint %s as Route53 cannot handle more than %d resource records", nEndpointsLimit, len(endpoint.Targets), *aws.String(endpoint.Targets[0]), maxResourceRecordsPerEntry)
 		}
+		targets := make([]string, nEndpointsLimit)
+		copy(targets, endpoint.Targets[0:nEndpointsLimit])
+		if len(endpoint.Targets) >= maxResourceRecordsPerEntry {
+			// ensure endpoints are sorted iff we have exceeded maxResourceRecordsPerEntry
+			sort.Strings(targets)
+		}
+
 		change.ResourceRecordSet.ResourceRecords = make([]*route53.ResourceRecord, nEndpointsLimit)
-		for i := 0; i < nEndpointsLimit; i++ {
+		for i := 0; i < len(change.ResourceRecordSet.ResourceRecords); i++ {
 			change.ResourceRecordSet.ResourceRecords[i] = &route53.ResourceRecord{
-				Value: aws.String(endpoint.Targets[i]),
+				Value: aws.String(targets[i]),
 			}
 		}
 	}
