@@ -22,8 +22,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/DataDog/external-dns/endpoint"
-	"github.com/DataDog/external-dns/plan"
+	"github.com/kubernetes-incubator/external-dns/endpoint"
+	"github.com/kubernetes-incubator/external-dns/plan"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -33,7 +33,9 @@ import (
 )
 
 const (
-	recordTTL = 300
+	// COMPUTE-495 - Route53 does not tolerate more than 400 resource records per entry
+	maxResourceRecordsPerEntry = 400
+	recordTTL                  = 300
 	// provider specific key that designates whether an AWS ALIAS record has the EvaluateTargetHealth
 	// field set to true.
 	providerSpecificEvaluateTargetHealth = "aws/evaluate-target-health"
@@ -211,7 +213,7 @@ func (p *AWSProvider) Records() (endpoints []*endpoint.Endpoint, _ error) {
 	f := func(resp *route53.ListResourceRecordSetsOutput, lastPage bool) (shouldContinue bool) {
 		for _, r := range resp.ResourceRecordSets {
 			// TODO(linki, ownership): Remove once ownership system is in place.
-			// See: https://github.com/DataDog/external-dns/pull/122/files/74e2c3d3e237411e619aefc5aab694742001cdec#r109863370
+			// See: https://github.com/kubernetes-incubator/external-dns/pull/122/files/74e2c3d3e237411e619aefc5aab694742001cdec#r109863370
 
 			if !supportedRecordType(aws.StringValue(r.Type)) {
 				continue
@@ -412,12 +414,10 @@ func (p *AWSProvider) newChange(action string, endpoint *endpoint.Endpoint) *rou
 			change.ResourceRecordSet.TTL = aws.Int64(int64(endpoint.RecordTTL))
 		}
 
-		// COMPUTE-495
-		maxEndpointsInRoute53 := 400
 		nEndpointsLimit := len(endpoint.Targets)
-		if nEndpointsLimit >= maxEndpointsInRoute53 {
-			nEndpointsLimit = maxEndpointsInRoute53
-			log.Warnf("Truncated endpoint targets to %d for endpoint %s (%d targets) as Route53 cannot handle more than %d resource records", nEndpointsLimit, *aws.String(endpoint.Targets[0]), len(endpoint.Targets), maxEndpointsInRoute53)
+		if nEndpointsLimit >= maxResourceRecordsPerEntry {
+			nEndpointsLimit = maxResourceRecordsPerEntry
+			log.Warnf("Truncated endpoint targets to %d for endpoint %s (%d targets) as Route53 cannot handle more than %d resource records", nEndpointsLimit, *aws.String(endpoint.Targets[0]), len(endpoint.Targets), maxResourceRecordsPerEntry)
 		}
 		change.ResourceRecordSet.ResourceRecords = make([]*route53.ResourceRecord, nEndpointsLimit)
 		for i := 0; i < nEndpointsLimit; i++ {

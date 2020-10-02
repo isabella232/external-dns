@@ -24,9 +24,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DataDog/external-dns/endpoint"
-	"github.com/DataDog/external-dns/internal/testutils"
-	"github.com/DataDog/external-dns/plan"
+	"github.com/kubernetes-incubator/external-dns/endpoint"
+	"github.com/kubernetes-incubator/external-dns/internal/testutils"
+	"github.com/kubernetes-incubator/external-dns/plan"
 	"github.com/aws/aws-sdk-go/aws"
 	sd "github.com/aws/aws-sdk-go/service/servicediscovery"
 	"github.com/stretchr/testify/assert"
