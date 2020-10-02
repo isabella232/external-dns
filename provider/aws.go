@@ -33,7 +33,9 @@ import (
 )
 
 const (
-	recordTTL = 300
+	// COMPUTE-495 - Route53 does not tolerate more than 400 resource records per entry
+	maxResourceRecordsPerEntry = 400
+	recordTTL                  = 300
 	// provider specific key that designates whether an AWS ALIAS record has the EvaluateTargetHealth
 	// field set to true.
 	providerSpecificEvaluateTargetHealth = "aws/evaluate-target-health"
@@ -322,7 +324,7 @@ func (p *AWSProvider) submitChanges(changes []*route53.Change) error {
 				nRecordsAsViewedByRoute53LimitsInChange := nLogicalRecordsInChange * multiplier
 				if nRecordsAsViewedByRoute53LimitsInChange > 200 {
 					log.Warnf("Desired change: %s %s %s has %d ResourceRecords, which is pretty spicy. Route53 limits Changes to %d ResourceRecords, so you may consider limiting the number of records?",
-						*c.Action, *c.ResourceRecordSet.Name, *c.ResourceRecordSet.Type, nLogicalRecordsInChange, nRecordsAsViewedByRoute53LimitsInChange, route53ResourceRecordsPerBatchLimit)
+						*c.Action, *c.ResourceRecordSet.Name, *c.ResourceRecordSet.Type, nLogicalRecordsInChange, nRecordsAsViewedByRoute53LimitsInChange)
 				} else {
 					log.Infof("Desired change: %s %s %s (%d records, %d records in route53.Change)", *c.Action, *c.ResourceRecordSet.Name, *c.ResourceRecordSet.Type, nLogicalRecordsInChange, nRecordsAsViewedByRoute53LimitsInChange)
 				}
@@ -411,10 +413,26 @@ func (p *AWSProvider) newChange(action string, endpoint *endpoint.Endpoint) *rou
 		} else {
 			change.ResourceRecordSet.TTL = aws.Int64(int64(endpoint.RecordTTL))
 		}
-		change.ResourceRecordSet.ResourceRecords = make([]*route53.ResourceRecord, len(endpoint.Targets))
-		for idx, val := range endpoint.Targets {
-			change.ResourceRecordSet.ResourceRecords[idx] = &route53.ResourceRecord{
-				Value: aws.String(val),
+
+		// NOTE(gabe): this is a hack to fix COMPUTE-495 where records with > maxResourceRecordsPerEntry
+		// targets are rejected by route53. A more elegant solution would be lovely,
+		// unfortunately this change was break/fix. Improvements welcome!
+		nEndpointsLimit := len(endpoint.Targets)
+		if nEndpointsLimit >= maxResourceRecordsPerEntry {
+			nEndpointsLimit = maxResourceRecordsPerEntry
+			log.Warnf("Truncating and sorting %d (of %d) endpoint targets for endpoint %s as Route53 cannot handle more than %d resource records", nEndpointsLimit, len(endpoint.Targets), *aws.String(endpoint.Targets[0]), maxResourceRecordsPerEntry)
+		}
+		targets := make([]string, nEndpointsLimit)
+		copy(targets, endpoint.Targets[0:nEndpointsLimit])
+		if len(endpoint.Targets) >= maxResourceRecordsPerEntry {
+			// ensure endpoints are sorted iff we have exceeded maxResourceRecordsPerEntry
+			sort.Strings(targets)
+		}
+
+		change.ResourceRecordSet.ResourceRecords = make([]*route53.ResourceRecord, nEndpointsLimit)
+		for i := 0; i < len(change.ResourceRecordSet.ResourceRecords); i++ {
+			change.ResourceRecordSet.ResourceRecords[i] = &route53.ResourceRecord{
+				Value: aws.String(targets[i]),
 			}
 		}
 	}
