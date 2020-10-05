@@ -37,11 +37,8 @@ Once your PR is landed, hop over to Spinnaker: https://spinnaker.ddbuild.io/#/pr
 
 ### V2/V3
 
-???
-
-### Vintage
-
-???
+* Chart: https://github.com/DataDog/k8s-platform-resources/tree/master/k8s/external-dns
+* Spinnaker deploy: https://spinnaker.ddbuild.io/#/projects/k8s-platform/applications/external-dns
 
 ## Hack
 
