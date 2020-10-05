@@ -444,13 +444,11 @@ func stableEndpointTargetSubset(ep *endpoint.Endpoint) []string {
 
 	log.Warnf("Truncating and sorting %d (of %d) endpoint targets for endpoint %s, which is in excess of Route53 limits of ResourceRecord per ResourceRecordSet", maxResourceRecordsPerResourceRecordSet, len(ep.Targets), ep.DNSName)
 	hashedTargets := map[string]string{}
+	var hashedTargetKeys []string
 	// hash, then sort targets, so we have a stable yet random subset of IPs
 	for _, val := range ep.Targets {
 		k := fmt.Sprintf("%x", md5.Sum([]byte(val)))
 		hashedTargets[k] = val
-	}
-	var hashedTargetKeys []string
-	for k := range hashedTargets {
 		hashedTargetKeys = append(hashedTargetKeys, k)
 	}
 
