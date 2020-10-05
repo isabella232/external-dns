@@ -17,6 +17,7 @@ limitations under the License.
 package provider
 
 import (
+	"crypto/md5"
 	"fmt"
 	"sort"
 	"strings"
@@ -33,9 +34,9 @@ import (
 )
 
 const (
-	// COMPUTE-495 - Route53 does not tolerate more than 400 resource records per entry
-	maxResourceRecordsPerEntry = 400
-	recordTTL                  = 300
+	// COMPUTE-495 - Route53 does not tolerate more than 400 resource records per RRSet
+	maxResourceRecordsPerResourceRecordSet = 400
+	recordTTL                              = 300
 	// provider specific key that designates whether an AWS ALIAS record has the EvaluateTargetHealth
 	// field set to true.
 	providerSpecificEvaluateTargetHealth = "aws/evaluate-target-health"
@@ -323,8 +324,8 @@ func (p *AWSProvider) submitChanges(changes []*route53.Change) error {
 				nLogicalRecordsInChange := len(c.ResourceRecordSet.ResourceRecords)
 				nRecordsAsViewedByRoute53LimitsInChange := nLogicalRecordsInChange * multiplier
 				if nRecordsAsViewedByRoute53LimitsInChange > 200 {
-					log.Warnf("Desired change: %s %s %s has %d ResourceRecords, which is pretty spicy. Route53 limits Changes to %d ResourceRecords, so you may consider limiting the number of records?",
-						*c.Action, *c.ResourceRecordSet.Name, *c.ResourceRecordSet.Type, nLogicalRecordsInChange, nRecordsAsViewedByRoute53LimitsInChange)
+					log.Warnf("Desired change: %s %s %s has %d logical ResourceRecords (%d total changes), which is pretty spicy. Route53 limits Changes to %d ResourceRecords per change, and %d ResourceRecords per ResourceRecordSet, so you may consider limiting the number of records?",
+						*c.Action, *c.ResourceRecordSet.Name, *c.ResourceRecordSet.Type, nLogicalRecordsInChange, nRecordsAsViewedByRoute53LimitsInChange, route53ResourceRecordsPerBatchLimit, maxResourceRecordsPerResourceRecordSet)
 				} else {
 					log.Infof("Desired change: %s %s %s (%d records, %d records in route53.Change)", *c.Action, *c.ResourceRecordSet.Name, *c.ResourceRecordSet.Type, nLogicalRecordsInChange, nRecordsAsViewedByRoute53LimitsInChange)
 				}
@@ -414,30 +415,49 @@ func (p *AWSProvider) newChange(action string, endpoint *endpoint.Endpoint) *rou
 			change.ResourceRecordSet.TTL = aws.Int64(int64(endpoint.RecordTTL))
 		}
 
-		// NOTE(gabe): this is a hack to fix COMPUTE-495 where records with > maxResourceRecordsPerEntry
-		// targets are rejected by route53. A more elegant solution would be lovely,
-		// unfortunately this change was break/fix. Improvements welcome!
-		nEndpointsLimit := len(endpoint.Targets)
-		if nEndpointsLimit >= maxResourceRecordsPerEntry {
-			nEndpointsLimit = maxResourceRecordsPerEntry
-			log.Warnf("Truncating and sorting %d (of %d) endpoint targets for endpoint %s as Route53 cannot handle more than %d resource records", nEndpointsLimit, len(endpoint.Targets), *aws.String(endpoint.Targets[0]), maxResourceRecordsPerEntry)
-		}
-		targets := make([]string, nEndpointsLimit)
-		copy(targets, endpoint.Targets[0:nEndpointsLimit])
-		if len(endpoint.Targets) >= maxResourceRecordsPerEntry {
-			// ensure endpoints are sorted iff we have exceeded maxResourceRecordsPerEntry
-			sort.Strings(targets)
-		}
-
-		change.ResourceRecordSet.ResourceRecords = make([]*route53.ResourceRecord, nEndpointsLimit)
-		for i := 0; i < len(change.ResourceRecordSet.ResourceRecords); i++ {
-			change.ResourceRecordSet.ResourceRecords[i] = &route53.ResourceRecord{
-				Value: aws.String(targets[i]),
+		mungedEndpointTargets := stableEndpointTargetSubset(endpoint)
+		change.ResourceRecordSet.ResourceRecords = make([]*route53.ResourceRecord, len(mungedEndpointTargets))
+		for idx, val := range mungedEndpointTargets {
+			change.ResourceRecordSet.ResourceRecords[idx] = &route53.ResourceRecord{
+				Value: aws.String(val),
 			}
 		}
 	}
 
 	return change
+}
+
+// stableEndpointTargetSubset handles keeping the endpoint targets made available as resource records
+// below Route53 limits for the number of resource records permitted per RRSet. Nominally, this does
+// not change the endpoints exposed at all. However, if there are more than maxResourceRecordsPerResourceRecordSet
+// targets, we hash, sort, and subslice them to ensure we stay south of Route53 limits.
+// COMPUTE-495
+func stableEndpointTargetSubset(ep *endpoint.Endpoint) []string {
+	if len(ep.Targets) < maxResourceRecordsPerResourceRecordSet {
+		// no mutating needed - just return a list (unsorted) of all endpoint.Targets
+		targets := make([]string, len(ep.Targets))
+		for idx, val := range ep.Targets {
+			targets[idx] = val
+		}
+		return targets
+	}
+
+	log.Warnf("Truncating and sorting %d (of %d) endpoint targets for endpoint %s, which is in excess of Route53 limits of ResourceRecord per ResourceRecordSet", maxResourceRecordsPerResourceRecordSet, len(ep.Targets), ep.DNSName)
+	hashedTargets := map[string]string{}
+	var hashedTargetKeys []string
+	// hash, then sort targets, so we have a stable yet random subset of IPs
+	for _, val := range ep.Targets {
+		k := fmt.Sprintf("%x", md5.Sum([]byte(val)))
+		hashedTargets[k] = val
+		hashedTargetKeys = append(hashedTargetKeys, k)
+	}
+
+	sort.Strings(hashedTargetKeys)
+	targets := make([]string, maxResourceRecordsPerResourceRecordSet)
+	for idx, k := range hashedTargetKeys[0:maxResourceRecordsPerResourceRecordSet] {
+		targets[idx] = hashedTargets[k]
+	}
+	return targets
 }
 
 func batchChangeSet(cs []*route53.Change, batchSize int) [][]*route53.Change {
