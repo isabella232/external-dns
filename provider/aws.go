@@ -17,6 +17,7 @@ limitations under the License.
 package provider
 
 import (
+	"crypto/md5"
 	"fmt"
 	"sort"
 	"strings"
@@ -414,26 +415,9 @@ func (p *AWSProvider) newChange(action string, endpoint *endpoint.Endpoint) *rou
 			change.ResourceRecordSet.TTL = aws.Int64(int64(endpoint.RecordTTL))
 		}
 
-		// NOTE(gabe): this is a hack to fix COMPUTE-495 where records with > maxResourceRecordsPerEntry
-		// targets are rejected by route53. A more elegant solution would be lovely,
-		// unfortunately this change was break/fix. Improvements welcome!
-		nEndpointsLimit := len(endpoint.Targets)
-		if nEndpointsLimit >= maxResourceRecordsPerEntry {
-			nEndpointsLimit = maxResourceRecordsPerEntry
-			log.Warnf("Truncating and sorting %d (of %d) endpoint targets for endpoint %s as Route53 cannot handle more than %d resource records", nEndpointsLimit, len(endpoint.Targets), endpoint.DNSName, maxResourceRecordsPerEntry)
-		}
-		var targets []string
-		if len(endpoint.Targets) >= maxResourceRecordsPerEntry {
-			// ensure endpoints are sorted iff we have exceeded maxResourceRecordsPerEntry
-			sort.Strings(endpoint.Targets)
-			targets = make([]string, maxResourceRecordsPerEntry)
-		} else {
-			targets = make([]string, len(endpoint.Targets))
-		}
-		copy(targets, endpoint.Targets[0:len(targets)])
-
-		change.ResourceRecordSet.ResourceRecords = make([]*route53.ResourceRecord, nEndpointsLimit)
-		for idx, val := range targets {
+		mungedEndpointTargets := stableEndpointTargetSubset(endpoint)
+		change.ResourceRecordSet.ResourceRecords = make([]*route53.ResourceRecord, len(mungedEndpointTargets))
+		for idx, val := range mungedEndpointTargets {
 			change.ResourceRecordSet.ResourceRecords[idx] = &route53.ResourceRecord{
 				Value: aws.String(val),
 			}
@@ -441,6 +425,41 @@ func (p *AWSProvider) newChange(action string, endpoint *endpoint.Endpoint) *rou
 	}
 
 	return change
+}
+
+// stableEndpointTargetSubset handles keeping the endpoint targets made available as resource records
+// below Route53 limits for the number of resource records permitted per RRSet. Nominally, this does
+// not change the endpoints exposed at all. However, if there are more than maxResourceRecordsPerEntry
+// targets, we hash, sort, and subslice them to ensure we stay south of Route53 limits.
+// COMPUTE-495
+func stableEndpointTargetSubset(ep *endpoint.Endpoint) []string {
+	if len(ep.Targets) < maxResourceRecordsPerEntry {
+		// no mutating needed - just return a list (unsorted) of all endpoint.Targets
+		targets := make([]string, len(ep.Targets))
+		for idx, val := range ep.Targets {
+			targets[idx] = val
+		}
+		return targets
+	}
+
+	log.Warnf("Truncating and sorting %d (of %d) endpoint targets for endpoint %s, which is in excess of Route53 limits of ResourceRecord per ResourceRecordSet", maxResourceRecordsPerEntry, len(ep.Targets), ep.DNSName)
+	hashedTargets := map[string]string{}
+	// hash, then sort targets, so we have a stable yet random subset of IPs
+	for _, val := range ep.Targets {
+		k := fmt.Sprintf("%x", md5.Sum([]byte(val)))
+		hashedTargets[k] = val
+	}
+	var hashedTargetKeys []string
+	for k := range hashedTargets {
+		hashedTargetKeys = append(hashedTargetKeys, k)
+	}
+
+	sort.Strings(hashedTargetKeys)
+	targets := make([]string, maxResourceRecordsPerEntry)
+	for idx, k := range hashedTargetKeys[0:maxResourceRecordsPerEntry] {
+		targets[idx] = hashedTargets[k]
+	}
+	return targets
 }
 
 func batchChangeSet(cs []*route53.Change, batchSize int) [][]*route53.Change {

@@ -611,8 +611,7 @@ func TestAWSsubmitChangesTooManyEndpointTargets(t *testing.T) {
 	ep := endpoint.NewEndpointWithTTL(hostname, endpoint.RecordTypeA, endpoint.TTL(recordTTL), targets...)
 	endpoints = append(endpoints, ep)
 
-	sort.Strings(expectedTargets)
-	expectedTargets = expectedTargets[0:maxResourceRecordsPerEntry]
+	expectedTargets = stableEndpointTargetSubset(ep)
 	fmt.Printf("Expecting endpoint with %d targets: %v\n", len(expectedTargets), expectedTargets)
 	expectedEp := endpoint.NewEndpointWithTTL(hostname, endpoint.RecordTypeA, endpoint.TTL(recordTTL), expectedTargets...)
 	expectedEndpoints = append(expectedEndpoints, expectedEp)
